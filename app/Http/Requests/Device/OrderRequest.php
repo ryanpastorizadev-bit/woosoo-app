@@ -14,7 +14,6 @@ class OrderRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'device_id' => ['required', 'integer', 'exists:devices,id'],
             'session_key' => ['required', 'string', 'max:120'],
             'guest_count' => ['required', 'integer', 'min:1', 'max:20'],
             'items' => ['required', 'array', 'min:1'],
