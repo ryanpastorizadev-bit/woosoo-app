@@ -1,0 +1,28 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    public function up(): void
+    {
+        Schema::create('devices', function (Blueprint $table): void {
+            $table->id();
+            $table->string('device_name')->nullable();
+            $table->foreignId('table_id')->nullable()->index();
+            $table->string('table_name')->nullable();
+            $table->string('token_hash')->unique();
+            $table->timestamp('last_seen_at')->nullable();
+            $table->timestamps();
+
+            $table->index(['table_id', 'last_seen_at']);
+        });
+    }
+
+    public function down(): void
+    {
+        Schema::dropIfExists('devices');
+    }
+};
