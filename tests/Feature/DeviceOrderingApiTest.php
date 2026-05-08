@@ -49,7 +49,7 @@ it('creates an initial order and print event', function (): void {
         ],
     ]);
 
-    $response->assertOk()
+    $response->assertCreated()
         ->assertJsonPath('data.type', DeviceOrder::TYPE_INITIAL)
         ->assertJsonPath('data.status', DeviceOrder::STATUS_ACTIVE)
         ->assertJsonPath('data.totalCents', 24000)
