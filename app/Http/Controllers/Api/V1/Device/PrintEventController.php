@@ -3,40 +3,37 @@
 namespace App\Http\Controllers\Api\V1\Device;
 
 use App\Actions\PrintEvents\AckPrintEventAction;
+use App\Contracts\PrintEventRepository;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Device\AckPrintEventRequest;
 use App\Http\Resources\PrintEventResource;
 use App\Models\Device;
-use App\Models\PrintEvent;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 
 class PrintEventController extends Controller
 {
+    public function __construct(private readonly PrintEventRepository $printEvents) {}
+
     public function index(Request $request): AnonymousResourceCollection
     {
         /** @var Device $device */
         $device = $request->attributes->get('device');
 
-        return PrintEventResource::collection(
-            PrintEvent::query()
-                ->whereHas('order', fn ($query) => $query->where('device_id', $device->id))
-                ->latest('id')
-                ->limit(50)
-                ->get()
-        );
+        return PrintEventResource::collection($this->printEvents->listForDevice($device));
     }
 
-    public function ack(Request $request, PrintEvent $printEvent, AckPrintEventAction $action): PrintEventResource
+    public function ack(AckPrintEventRequest $request, int $printEvent, AckPrintEventAction $action): PrintEventResource
     {
         /** @var Device $device */
         $device = $request->attributes->get('device');
-        $printEvent->loadMissing('order');
+        $event = $this->printEvents->findForDevice($printEvent, $device);
 
-        if ((int) $printEvent->order->device_id !== (int) $device->id) {
+        if (! $event) {
             throw new HttpResponseException(response()->json(['message' => 'Print event not found.'], 404));
         }
 
-        return PrintEventResource::make($action->execute($printEvent));
+        return PrintEventResource::make($action->execute($event));
     }
 }
