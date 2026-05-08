@@ -237,3 +237,111 @@ it('blocks print acknowledgement for another devices print event', function (): 
     $this->withHeaders(bearerHeaders($attackerToken))->postJson("/api/v1/device/print-events/{$printEvent->id}/ack")
         ->assertNotFound();
 });
+
+it('returns POS readiness when fake session and terminal are open', function (): void {
+    $token = str_repeat('i', 64);
+    deviceWithToken($token);
+
+    config()->set('pos.fake.readiness', [
+        'session' => [
+            'id' => '999',
+            'openedAt' => '2026-05-08T10:00:00+08:00',
+            'status' => 'open',
+        ],
+        'terminal' => [
+            'id' => '1',
+            'name' => 'Main POS',
+            'status' => 'open',
+        ],
+        'blockingReason' => null,
+    ]);
+
+    $this->withHeaders(bearerHeaders($token))
+        ->getJson('/api/v1/device/pos/readiness')
+        ->assertOk()
+        ->assertJsonPath('ready', true)
+        ->assertJsonPath('session.id', '999')
+        ->assertJsonPath('terminal.name', 'Main POS')
+        ->assertJsonPath('blockingReason', null);
+});
+
+it('returns POS readiness blocked when fake session and terminal are unavailable', function (): void {
+    $token = str_repeat('j', 64);
+    deviceWithToken($token);
+
+    config()->set('pos.fake.readiness', [
+        'session' => null,
+        'terminal' => null,
+        'blockingReason' => 'No open POS session or terminal found.',
+    ]);
+
+    $this->withHeaders(bearerHeaders($token))
+        ->getJson('/api/v1/device/pos/readiness')
+        ->assertOk()
+        ->assertJsonPath('ready', false)
+        ->assertJsonPath('session', null)
+        ->assertJsonPath('terminal', null)
+        ->assertJsonPath('blockingReason', 'No open POS session or terminal found.');
+});
+
+it('returns normalized POS table statuses with safe unknown fallback', function (): void {
+    $token = str_repeat('k', 64);
+    deviceWithToken($token);
+
+    config()->set('pos.fake.tables', [
+        ['id' => '1', 'name' => 'Table 1', 'rawStatus' => 'AVAILABLE', 'isAvailable' => true, 'isLocked' => false],
+        ['id' => '2', 'name' => 'Table 2', 'rawStatus' => 'OPEN', 'isAvailable' => false, 'isLocked' => true],
+        ['id' => '3', 'name' => 'Table 3', 'rawStatus' => 'LOCKED', 'isAvailable' => false, 'isLocked' => true],
+        ['id' => '4', 'name' => 'Table 4', 'rawStatus' => 'DIRTY', 'isAvailable' => false, 'isLocked' => true],
+        ['id' => '5', 'name' => 'Table 5', 'rawStatus' => 'MYSTERY', 'isAvailable' => false, 'isLocked' => false],
+    ]);
+
+    $response = $this->withHeaders(bearerHeaders($token))
+        ->getJson('/api/v1/device/pos/tables')
+        ->assertOk()
+        ->assertJsonCount(5, 'tables');
+
+    $tables = collect($response->json('tables'))->keyBy('id');
+
+    expect($tables['1']['status'])->toBe('available')
+        ->and($tables['1']['color'])->toBe('green')
+        ->and($tables['1']['isOrderable'])->toBeTrue()
+        ->and($tables['2']['status'])->toBe('occupied')
+        ->and($tables['3']['status'])->toBe('locked')
+        ->and($tables['4']['status'])->toBe('dirty')
+        ->and($tables['5']['status'])->toBe('unknown');
+});
+
+it('updates assigned POS table state after order submission and reflects it in table status endpoint', function (): void {
+    $token = str_repeat('l', 64);
+    deviceWithToken($token, [
+        'table_id' => 12,
+        'table_name' => 'Table 12',
+    ]);
+
+    config()->set('pos.fake.tables', [
+        ['id' => '12', 'name' => 'Table 12', 'rawStatus' => 'AVAILABLE', 'isAvailable' => true, 'isLocked' => false],
+    ]);
+
+    $this->withHeaders(bearerHeaders($token))->postJson('/api/v1/device/orders', [
+        'session_key' => 'session-pos-table-state',
+        'guest_count' => 2,
+        'items' => [
+            [
+                'menu_id' => 101,
+                'name' => 'Samgyeopsal',
+                'quantity' => 1,
+                'unit_price_cents' => 12000,
+            ],
+        ],
+    ])->assertCreated();
+
+    $this->withHeaders(bearerHeaders($token))
+        ->getJson('/api/v1/device/pos/tables')
+        ->assertOk()
+        ->assertJsonPath('tables.0.id', '12')
+        ->assertJsonPath('tables.0.rawStatus', 'ORDER_SENT')
+        ->assertJsonPath('tables.0.status', 'occupied')
+        ->assertJsonPath('tables.0.color', 'red')
+        ->assertJsonPath('tables.0.isOrderable', false);
+});
