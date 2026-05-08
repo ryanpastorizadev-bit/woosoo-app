@@ -1,8 +1,14 @@
 <?php
 
+use App\Contracts\PosOrderGateway;
+use App\Events\OrderCreated;
+use App\Events\OrderRefilled;
+use App\Events\PrintEventCreated;
+use App\Events\PrintEventUpdated;
 use App\Models\Device;
 use App\Models\DeviceOrder;
 use App\Models\PrintEvent;
+use Illuminate\Support\Facades\Event;
 
 function deviceWithToken(string $token, array $attributes = []): Device
 {
@@ -59,6 +65,8 @@ it('rejects protected device endpoints without bearer credentials', function ():
 });
 
 it('creates an initial order and print event from bearer device context', function (): void {
+    Event::fake([OrderCreated::class, PrintEventCreated::class]);
+
     $token = str_repeat('a', 64);
     $device = deviceWithToken($token);
 
@@ -96,6 +104,9 @@ it('creates an initial order and print event from bearer device context', functi
         'status' => PrintEvent::STATUS_PENDING,
         'target' => 'kitchen',
     ]);
+
+    Event::assertDispatched(OrderCreated::class);
+    Event::assertDispatched(PrintEventCreated::class);
 });
 
 it('blocks duplicate active orders for the same bearer device session', function (): void {
@@ -122,6 +133,8 @@ it('blocks duplicate active orders for the same bearer device session', function
 });
 
 it('submits a refill order for an active order owned by the bearer device', function (): void {
+    Event::fake([OrderRefilled::class, PrintEventCreated::class]);
+
     $token = str_repeat('c', 64);
     $device = deviceWithToken($token, [
         'table_id' => 8,
@@ -152,6 +165,9 @@ it('submits a refill order for an active order owned by the bearer device', func
     $response->assertCreated()
         ->assertJsonPath('data.type', DeviceOrder::TYPE_REFILL)
         ->assertJsonPath('data.parentOrderId', $order->id);
+
+    Event::assertDispatched(OrderRefilled::class);
+    Event::assertDispatched(PrintEventCreated::class);
 });
 
 it('blocks refill access to another devices order', function (): void {
@@ -183,6 +199,8 @@ it('blocks refill access to another devices order', function (): void {
 });
 
 it('acknowledges a print event owned by the bearer device', function (): void {
+    Event::fake([PrintEventUpdated::class]);
+
     $token = str_repeat('f', 64);
     $device = deviceWithToken($token, [
         'table_id' => 9,
@@ -210,6 +228,38 @@ it('acknowledges a print event owned by the bearer device', function (): void {
         ->assertJsonPath('data.status', PrintEvent::STATUS_ACKNOWLEDGED);
 
     expect($printEvent->refresh()->acknowledged_at)->not->toBeNull();
+    Event::assertDispatched(PrintEventUpdated::class);
+});
+
+it('rolls back order persistence when the POS gateway submission fails', function (): void {
+    app()->instance(PosOrderGateway::class, new class implements PosOrderGateway
+    {
+        public function submit(DeviceOrder $order): string
+        {
+            throw new RuntimeException('Synthetic POS failure');
+        }
+    });
+
+    $token = str_repeat('z', 64);
+    $device = deviceWithToken($token);
+
+    $this->withHeaders(bearerHeaders($token))->postJson('/api/v1/device/orders', [
+        'session_key' => 'session-rollback',
+        'guest_count' => 2,
+        'items' => [
+            [
+                'menu_id' => 999,
+                'name' => 'Rollback Menu',
+                'quantity' => 1,
+                'unit_price_cents' => 1000,
+            ],
+        ],
+    ])->assertServerError();
+
+    $this->assertDatabaseMissing('device_orders', [
+        'device_id' => $device->id,
+        'session_key' => 'session-rollback',
+    ]);
 });
 
 it('blocks print acknowledgement for another devices print event', function (): void {

@@ -2,21 +2,20 @@
 
 namespace App\Actions\PrintEvents;
 
+use App\Contracts\PrintEventRepository;
+use App\Events\PrintEventUpdated;
 use App\Models\PrintEvent;
 
 class AckPrintEventAction
 {
+    public function __construct(private readonly PrintEventRepository $printEvents) {}
+
     public function execute(PrintEvent $printEvent): PrintEvent
     {
-        if ($printEvent->acknowledged_at !== null) {
-            return $printEvent;
-        }
+        $printEvent = $this->printEvents->acknowledge($printEvent);
 
-        $printEvent->forceFill([
-            'status' => PrintEvent::STATUS_ACKNOWLEDGED,
-            'acknowledged_at' => now(),
-        ])->save();
+        event(new PrintEventUpdated($printEvent->withoutRelations()->fresh()));
 
-        return $printEvent->refresh();
+        return $printEvent;
     }
 }

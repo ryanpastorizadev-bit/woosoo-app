@@ -1,5 +1,8 @@
 <?php
 
+use App\Http\Controllers\Api\V1\Admin\AdminDeviceController;
+use App\Http\Controllers\Api\V1\Admin\AdminOrderController;
+use App\Http\Controllers\Api\V1\Admin\AdminPrintEventController;
 use App\Http\Controllers\Api\V1\Device\DeviceOrderController;
 use App\Http\Controllers\Api\V1\Device\DeviceSessionController;
 use App\Http\Controllers\Api\V1\Device\PrintEventController;
@@ -18,4 +21,10 @@ Route::prefix('v1/device')->group(function (): void {
         Route::get('print-events', [PrintEventController::class, 'index']);
         Route::post('print-events/{printEvent}/ack', [PrintEventController::class, 'ack']);
     });
+});
+
+Route::prefix('v1/admin')->group(function (): void {
+    Route::get('devices', [AdminDeviceController::class, 'index']);
+    Route::get('orders/active', [AdminOrderController::class, 'active']);
+    Route::get('print-events', [AdminPrintEventController::class, 'index']);
 });

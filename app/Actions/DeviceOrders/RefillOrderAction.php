@@ -2,7 +2,11 @@
 
 namespace App\Actions\DeviceOrders;
 
+use App\Contracts\DeviceOrderRepository;
 use App\Contracts\PosOrderGateway;
+use App\Contracts\PrintEventRepository;
+use App\Events\OrderRefilled;
+use App\Events\PrintEventCreated;
 use App\Models\DeviceOrder;
 use App\Services\OrderTotalsCalculator;
 use Illuminate\Support\Facades\DB;
@@ -13,6 +17,8 @@ class RefillOrderAction
     public function __construct(
         private readonly OrderTotalsCalculator $totalsCalculator,
         private readonly PosOrderGateway $posOrderGateway,
+        private readonly DeviceOrderRepository $orders,
+        private readonly PrintEventRepository $printEvents,
     ) {}
 
     /**
@@ -31,7 +37,7 @@ class RefillOrderAction
 
             $totals = $this->totalsCalculator->calculate($payload['items']);
 
-            $refill = DeviceOrder::query()->create([
+            $refill = $this->orders->create([
                 'device_id' => $parentOrder->device_id,
                 'parent_order_id' => $parentOrder->id,
                 'table_id' => $parentOrder->table_id,
@@ -49,7 +55,7 @@ class RefillOrderAction
                 $quantity = (int) $item['quantity'];
                 $unitPrice = (int) ($item['unit_price_cents'] ?? 0);
 
-                $refill->items()->create([
+                $this->orders->createItem($refill, [
                     'menu_id' => $item['menu_id'],
                     'name' => $item['name'],
                     'quantity' => $quantity,
@@ -64,7 +70,7 @@ class RefillOrderAction
                 'pos_order_reference' => $this->posOrderGateway->submit($refill->load('items')),
             ])->save();
 
-            $refill->printEvents()->create([
+            $printEvent = $this->printEvents->create($refill, [
                 'target' => 'kitchen',
                 'payload' => [
                     'kind' => 'refill_order',
@@ -73,6 +79,9 @@ class RefillOrderAction
                     'table_name' => $refill->table_name,
                 ],
             ]);
+
+            event(new OrderRefilled($refill->withoutRelations()->fresh()));
+            event(new PrintEventCreated($printEvent->withoutRelations()->fresh()));
 
             return $refill->load(['items', 'printEvents']);
         });

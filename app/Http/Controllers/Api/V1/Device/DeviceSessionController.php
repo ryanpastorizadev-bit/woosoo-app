@@ -3,10 +3,10 @@
 namespace App\Http\Controllers\Api\V1\Device;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Device\RestoreSessionRequest;
 use App\Http\Requests\Device\StartSessionRequest;
 use App\Models\Device;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 
 class DeviceSessionController extends Controller
@@ -32,11 +32,9 @@ class DeviceSessionController extends Controller
         ], 201);
     }
 
-    public function restore(Request $request): JsonResponse
+    public function restore(RestoreSessionRequest $request): JsonResponse
     {
-        $validated = $request->validate([
-            'token' => ['required', 'string', 'size:64'],
-        ]);
+        $validated = $request->validated();
 
         $device = Device::query()
             ->where('token_hash', hash('sha256', $validated['token']))
