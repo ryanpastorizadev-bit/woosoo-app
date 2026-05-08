@@ -18,6 +18,7 @@ Do not modify:
 flowchart TD
     Tablet[Tablet PWA]
     Api[Laravel API /api/v1/device]
+    Middleware[ResolveDeviceFromBearer Middleware]
     Controllers[Thin API Controllers]
     Actions[Application Actions]
     Models[Eloquent Models]
@@ -27,7 +28,8 @@ flowchart TD
     Reverb[Future Reverb Events]
 
     Tablet --> Api
-    Api --> Controllers
+    Api --> Middleware
+    Middleware --> Controllers
     Controllers --> Actions
     Actions --> Models
     Models --> DB
@@ -39,18 +41,20 @@ flowchart TD
 ## Implemented Backend Surface
 
 - Device session start and restore
-- Initial order creation
-- Active order lookup
-- Refill order submission
-- Print event listing
-- Print event acknowledgement
+- Bearer-token device middleware
+- Initial order creation from resolved device context
+- Active order lookup from resolved device context
+- Refill order submission scoped to the resolved device
+- Print event listing scoped to the resolved device
+- Print event acknowledgement scoped to the resolved device
 
 ## State Machine
 
 ```mermaid
 stateDiagram-v2
     [*] --> SessionStarted
-    SessionStarted --> InitialOrderSubmitted: initial order submitted
+    SessionStarted --> DeviceAuthenticated: bearer token accepted
+    DeviceAuthenticated --> InitialOrderSubmitted: initial order submitted
     InitialOrderSubmitted --> ActiveOrder: POS accepted
     ActiveOrder --> RefillSubmitted: refill submitted
     RefillSubmitted --> ActiveOrder
@@ -64,13 +68,15 @@ stateDiagram-v2
 
 - Device tokens are returned only once during session start.
 - Device tokens are stored as SHA-256 hashes.
+- Protected device endpoints now resolve the device from `Authorization: Bearer <token>`.
+- Order creation and active-order lookup no longer trust request-level `device_id`.
+- Refill and print-event operations verify ownership against the resolved device context.
 - Broadcast payloads must not expose device tokens.
 - POS gateway failures must not leak raw stored procedure details to clients.
-- MVP order endpoints currently accept `device_id` directly. This is a development-only bridge and must be replaced with bearer-token device context before production exposure.
 
 ## Race Condition Notes
 
-- Duplicate active order creation is guarded by `device_id + session_key` inside a database transaction.
+- Duplicate active order creation is guarded by resolved `device_id + session_key` inside a database transaction.
 - The active-order check uses `lockForUpdate()` when the database driver supports row-level locking.
 - Reverb event dispatch is intentionally deferred to the next slice so it can be implemented with after-commit semantics.
 
@@ -78,14 +84,14 @@ stateDiagram-v2
 
 - [x] Race conditions / async leaks considered
 - [x] State machine / contract integrity considered
-- [ ] Security / auth boundary still needs bearer-token device guard before production
+- [x] Security / auth boundary upgraded with bearer-token device middleware
+- [x] Cross-device refill and print-event access blocked
 - [x] Monorepo / shared config drift avoided
 - [x] Test sufficiency seeded with feature tests
 
 ## Known Follow-ups
 
-1. Replace request-level `device_id` trust with token-authenticated device context.
+1. Run the full local test/lint suite on `feat/device-token-middleware`.
 2. Add real Krypton POS stored-procedure gateway implementation.
 3. Dispatch Reverb events after commit for order and print state changes.
 4. Add admin endpoints only after device flow is stable.
-5. Run the full local test/lint suite in a checked-out environment.
