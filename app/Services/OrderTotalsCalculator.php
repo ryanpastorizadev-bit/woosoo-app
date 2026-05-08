@@ -10,8 +10,7 @@ class OrderTotalsCalculator
      */
     public function calculate(array $items): array
     {
-        $subtotal = collect($items)->sum(fn (array $item): int =>
-            (int) $item['quantity'] * (int) ($item['unit_price_cents'] ?? 0)
+        $subtotal = collect($items)->sum(fn (array $item): int => (int) $item['quantity'] * (int) ($item['unit_price_cents'] ?? 0)
         );
 
         return [

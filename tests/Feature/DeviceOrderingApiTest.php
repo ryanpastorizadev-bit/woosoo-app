@@ -88,7 +88,7 @@ it('blocks duplicate active orders for the same device session', function (): vo
         ],
     ];
 
-    $this->postJson('/api/v1/device/orders', $payload)->assertOk();
+    $this->postJson('/api/v1/device/orders', $payload)->assertCreated();
     $this->postJson('/api/v1/device/orders', $payload)
         ->assertUnprocessable()
         ->assertJsonValidationErrors('session_key');
@@ -122,7 +122,7 @@ it('submits a refill order for an active order', function (): void {
         ],
     ]);
 
-    $response->assertOk()
+    $response->assertCreated()
         ->assertJsonPath('data.type', DeviceOrder::TYPE_REFILL)
         ->assertJsonPath('data.parentOrderId', $order->id);
 });

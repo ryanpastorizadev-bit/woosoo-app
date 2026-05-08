@@ -12,9 +12,13 @@ class DeviceOrder extends Model
     use HasFactory;
 
     public const STATUS_ACTIVE = 'active';
+
     public const STATUS_SUBMITTED = 'submitted';
+
     public const STATUS_COMPLETED = 'completed';
+
     public const TYPE_INITIAL = 'initial';
+
     public const TYPE_REFILL = 'refill';
 
     protected $fillable = [

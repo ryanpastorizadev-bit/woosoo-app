@@ -11,6 +11,7 @@ class PrintEvent extends Model
     use HasFactory;
 
     public const STATUS_PENDING = 'pending';
+
     public const STATUS_ACKNOWLEDGED = 'acknowledged';
 
     protected $fillable = [
