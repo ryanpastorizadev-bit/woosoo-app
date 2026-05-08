@@ -4,6 +4,21 @@ use App\Models\Device;
 use App\Models\DeviceOrder;
 use App\Models\PrintEvent;
 
+function deviceWithToken(string $token, array $attributes = []): Device
+{
+    return Device::query()->create([
+        'table_id' => $attributes['table_id'] ?? 7,
+        'table_name' => $attributes['table_name'] ?? 'Table 7',
+        'token_hash' => hash('sha256', $token),
+        ...$attributes,
+    ]);
+}
+
+function bearerHeaders(string $token): array
+{
+    return ['Authorization' => 'Bearer '.$token];
+}
+
 it('starts a device session', function (): void {
     $response = $this->postJson('/api/v1/device/session/start', [
         'device_name' => 'Galaxy Tab A9 01',
@@ -28,15 +43,26 @@ it('starts a device session', function (): void {
     ]);
 });
 
-it('creates an initial order and print event', function (): void {
-    $device = Device::query()->create([
-        'table_id' => 7,
-        'table_name' => 'Table 7',
-        'token_hash' => hash('sha256', 'test-token'),
-    ]);
+it('rejects protected device endpoints without bearer credentials', function (): void {
+    $this->postJson('/api/v1/device/orders', [
+        'session_key' => 'session-unauthorized',
+        'guest_count' => 2,
+        'items' => [
+            [
+                'menu_id' => 101,
+                'name' => 'Samgyeopsal',
+                'quantity' => 1,
+                'unit_price_cents' => 12000,
+            ],
+        ],
+    ])->assertUnauthorized();
+});
 
-    $response = $this->postJson('/api/v1/device/orders', [
-        'device_id' => $device->id,
+it('creates an initial order and print event from bearer device context', function (): void {
+    $token = str_repeat('a', 64);
+    $device = deviceWithToken($token);
+
+    $response = $this->withHeaders(bearerHeaders($token))->postJson('/api/v1/device/orders', [
         'session_key' => 'session-001',
         'guest_count' => 3,
         'items' => [
@@ -55,6 +81,11 @@ it('creates an initial order and print event', function (): void {
         ->assertJsonPath('data.totalCents', 24000)
         ->assertJsonPath('data.posOrderReference', 'FAKE-POS-1');
 
+    $this->assertDatabaseHas('device_orders', [
+        'device_id' => $device->id,
+        'session_key' => 'session-001',
+    ]);
+
     $this->assertDatabaseHas('device_order_items', [
         'menu_id' => 101,
         'quantity' => 2,
@@ -67,15 +98,11 @@ it('creates an initial order and print event', function (): void {
     ]);
 });
 
-it('blocks duplicate active orders for the same device session', function (): void {
-    $device = Device::query()->create([
-        'table_id' => 7,
-        'table_name' => 'Table 7',
-        'token_hash' => hash('sha256', 'test-token'),
-    ]);
+it('blocks duplicate active orders for the same bearer device session', function (): void {
+    $token = str_repeat('b', 64);
+    deviceWithToken($token);
 
     $payload = [
-        'device_id' => $device->id,
         'session_key' => 'session-duplicate',
         'guest_count' => 2,
         'items' => [
@@ -88,17 +115,17 @@ it('blocks duplicate active orders for the same device session', function (): vo
         ],
     ];
 
-    $this->postJson('/api/v1/device/orders', $payload)->assertCreated();
-    $this->postJson('/api/v1/device/orders', $payload)
+    $this->withHeaders(bearerHeaders($token))->postJson('/api/v1/device/orders', $payload)->assertCreated();
+    $this->withHeaders(bearerHeaders($token))->postJson('/api/v1/device/orders', $payload)
         ->assertUnprocessable()
         ->assertJsonValidationErrors('session_key');
 });
 
-it('submits a refill order for an active order', function (): void {
-    $device = Device::query()->create([
+it('submits a refill order for an active order owned by the bearer device', function (): void {
+    $token = str_repeat('c', 64);
+    $device = deviceWithToken($token, [
         'table_id' => 8,
         'table_name' => 'Table 8',
-        'token_hash' => hash('sha256', 'test-token'),
     ]);
 
     $order = DeviceOrder::query()->create([
@@ -111,7 +138,7 @@ it('submits a refill order for an active order', function (): void {
         'guest_count' => 2,
     ]);
 
-    $response = $this->postJson("/api/v1/device/orders/{$order->id}/refills", [
+    $response = $this->withHeaders(bearerHeaders($token))->postJson("/api/v1/device/orders/{$order->id}/refills", [
         'items' => [
             [
                 'menu_id' => 202,
@@ -127,11 +154,39 @@ it('submits a refill order for an active order', function (): void {
         ->assertJsonPath('data.parentOrderId', $order->id);
 });
 
-it('acknowledges a print event once', function (): void {
-    $device = Device::query()->create([
+it('blocks refill access to another devices order', function (): void {
+    $ownerToken = str_repeat('d', 64);
+    $attackerToken = str_repeat('e', 64);
+    $owner = deviceWithToken($ownerToken, ['table_id' => 10, 'table_name' => 'Table 10']);
+    deviceWithToken($attackerToken, ['table_id' => 11, 'table_name' => 'Table 11']);
+
+    $order = DeviceOrder::query()->create([
+        'device_id' => $owner->id,
+        'table_id' => 10,
+        'table_name' => 'Table 10',
+        'session_key' => 'session-owned',
+        'type' => DeviceOrder::TYPE_INITIAL,
+        'status' => DeviceOrder::STATUS_ACTIVE,
+        'guest_count' => 2,
+    ]);
+
+    $this->withHeaders(bearerHeaders($attackerToken))->postJson("/api/v1/device/orders/{$order->id}/refills", [
+        'items' => [
+            [
+                'menu_id' => 202,
+                'name' => 'Kimchi Refill',
+                'quantity' => 1,
+                'unit_price_cents' => 0,
+            ],
+        ],
+    ])->assertNotFound();
+});
+
+it('acknowledges a print event owned by the bearer device', function (): void {
+    $token = str_repeat('f', 64);
+    $device = deviceWithToken($token, [
         'table_id' => 9,
         'table_name' => 'Table 9',
-        'token_hash' => hash('sha256', 'test-token'),
     ]);
 
     $order = DeviceOrder::query()->create([
@@ -150,9 +205,35 @@ it('acknowledges a print event once', function (): void {
         'payload' => ['kind' => 'initial_order'],
     ]);
 
-    $this->postJson("/api/v1/device/print-events/{$printEvent->id}/ack")
+    $this->withHeaders(bearerHeaders($token))->postJson("/api/v1/device/print-events/{$printEvent->id}/ack")
         ->assertOk()
         ->assertJsonPath('data.status', PrintEvent::STATUS_ACKNOWLEDGED);
 
     expect($printEvent->refresh()->acknowledged_at)->not->toBeNull();
+});
+
+it('blocks print acknowledgement for another devices print event', function (): void {
+    $ownerToken = str_repeat('g', 64);
+    $attackerToken = str_repeat('h', 64);
+    $owner = deviceWithToken($ownerToken, ['table_id' => 12, 'table_name' => 'Table 12']);
+    deviceWithToken($attackerToken, ['table_id' => 13, 'table_name' => 'Table 13']);
+
+    $order = DeviceOrder::query()->create([
+        'device_id' => $owner->id,
+        'table_id' => 12,
+        'table_name' => 'Table 12',
+        'session_key' => 'session-print-owned',
+        'type' => DeviceOrder::TYPE_INITIAL,
+        'status' => DeviceOrder::STATUS_ACTIVE,
+        'guest_count' => 2,
+    ]);
+
+    $printEvent = PrintEvent::query()->create([
+        'device_order_id' => $order->id,
+        'target' => 'kitchen',
+        'payload' => ['kind' => 'initial_order'],
+    ]);
+
+    $this->withHeaders(bearerHeaders($attackerToken))->postJson("/api/v1/device/print-events/{$printEvent->id}/ack")
+        ->assertNotFound();
 });

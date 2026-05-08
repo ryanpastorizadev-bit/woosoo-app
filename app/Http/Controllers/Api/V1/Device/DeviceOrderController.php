@@ -15,7 +15,8 @@ class DeviceOrderController extends Controller
 {
     public function store(OrderRequest $request, CreateOrderAction $action): DeviceOrderResource
     {
-        $device = Device::query()->findOrFail($request->integer('device_id'));
+        /** @var Device $device */
+        $device = $request->attributes->get('device');
 
         return DeviceOrderResource::make($action->execute($device, $request->validated()));
     }
@@ -23,11 +24,11 @@ class DeviceOrderController extends Controller
     public function active(Request $request, GetActiveOrderAction $action): JsonResponse|DeviceOrderResource
     {
         $validated = $request->validate([
-            'device_id' => ['required', 'integer', 'exists:devices,id'],
             'session_key' => ['nullable', 'string', 'max:120'],
         ]);
 
-        $device = Device::query()->findOrFail($validated['device_id']);
+        /** @var Device $device */
+        $device = $request->attributes->get('device');
         $order = $action->execute($device, $validated['session_key'] ?? null);
 
         if (! $order) {
