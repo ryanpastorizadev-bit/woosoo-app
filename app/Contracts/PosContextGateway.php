@@ -2,6 +2,8 @@
 
 namespace App\Contracts;
 
+use App\Models\Device;
+
 interface PosContextGateway
 {
     /**
@@ -18,4 +20,9 @@ interface PosContextGateway
      * @return array<int, array{id:string,name:string,rawStatus:string,status:string,color:string,isOrderable:bool}>
      */
     public function tables(): array;
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function resolveForDevice(Device $device): array;
 }
