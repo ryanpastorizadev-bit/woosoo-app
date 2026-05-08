@@ -1,32 +1,25 @@
-# HANDOVER PROTOCOL: MVP Ordering Backend Core
+# HANDOVER PROTOCOL: Device Bearer Middleware Slice
 
 ## Current Status
-The first backend-only development slice has been implemented in `woosoo-app`.
+The `feat/device-token-middleware` backend slice upgrades the MVP device API from request-level `device_id` trust to bearer-token device context.
 
 ## Completed
 
-- Registered `routes/api.php` in Laravel bootstrap.
-- Added MVP device API routes under `/api/v1/device`.
-- Added migrations for:
-  - `devices`
-  - `device_orders`
-  - `device_order_items`
-  - `print_events`
-- Added Eloquent models and relationships.
-- Added `PosOrderGateway` contract.
-- Added `FakePosOrderGateway` for safe local/dev testing.
-- Bound the POS gateway contract in `AppServiceProvider`.
-- Added actions for:
-  - initial order creation
-  - active order lookup
-  - refill order submission
-  - print event acknowledgement
-- Added request validation and JSON resources.
-- Added feature tests for the MVP API flow.
+- Added `ResolveDeviceFromBearer` middleware.
+- Registered the middleware alias as `device` in `bootstrap/app.php`.
+- Protected order/refill/print routes behind the `device` middleware.
+- Kept session start and restore public.
+- Removed `device_id` from initial order validation.
+- Updated `DeviceOrderController` to resolve the device from request attributes.
+- Scoped refill submission to the resolved device owner.
+- Scoped print event listing and acknowledgement to the resolved device owner.
+- Updated feature tests to use `Authorization: Bearer <token>`.
+- Added tests for missing bearer credentials.
+- Added tests for cross-device refill and print acknowledgement blocking.
 - Updated `docs/CASE_FILE.md`.
 
 ## Validation Commands
-Run locally after pulling latest `main`:
+Run locally after checking out the branch:
 
 ```bash
 composer install
@@ -35,11 +28,24 @@ php artisan test tests/Feature/DeviceOrderingApiTest.php
 composer test
 ```
 
-## API Contract Implemented
+## API Auth Contract
+
+Public endpoints:
 
 ```http
 POST /api/v1/device/session/start
 POST /api/v1/device/session/restore
+```
+
+Protected endpoints require:
+
+```http
+Authorization: Bearer <64-character-device-token>
+```
+
+Protected endpoints:
+
+```http
 GET  /api/v1/device/orders/active
 POST /api/v1/device/orders
 POST /api/v1/device/orders/{order}/refills
@@ -49,29 +55,28 @@ POST /api/v1/device/print-events/{printEvent}/ack
 
 ## Important Risks
 
-1. `device_id` is currently accepted from request payload/query for MVP speed. Replace with token-authenticated device context before production.
-2. `FakePosOrderGateway` must be replaced or conditionally configured before real POS integration.
+1. Tests were updated through the connector but still need a local `composer test` run on this branch.
+2. `FakePosOrderGateway` remains intentionally active for test/dev.
 3. Reverb events are not yet implemented. Add after-commit broadcasting in the next backend slice.
 4. Admin routes are not implemented yet.
-5. Tests were added but not executed by the connector environment.
 
 ## Next Slice Recommendation
 
-Implement device bearer-token middleware:
+Add after-commit Reverb events:
 
 ```mermaid
 flowchart TD
-    Request[Tablet API Request]
-    Auth[Device Token Middleware]
-    Device[Resolved Device Model]
-    Controller[Controller Uses Request Device]
+    Action[Order/Print Action]
+    DB[(Transaction Commit)]
+    Event[Domain Event]
+    Reverb[Reverb Broadcast]
+    Tablet[Tablet PWA]
 
-    Request --> Auth
-    Auth --> Device
-    Device --> Controller
+    Action --> DB
+    DB --> Event
+    Event --> Reverb
+    Reverb --> Tablet
 ```
 
-Then remove direct `device_id` trust from order and active-order endpoints.
-
 ## Handover Rule
-Do not begin frontend integration until backend API payloads are verified locally with feature tests or manual API calls.
+Do not begin frontend integration until this branch is validated locally and merged.
